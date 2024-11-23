@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ride Sharing App</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    
+</head>
+<body>
+    <div class="container">
+        <h1>Welcome to Ride Sharing App</h1>
+        
+        <!-- Sign Up and Sign In Forms -->
+        <div class="form-container active" id="authContainer">
+            <form id="signupForm">
+                <h2>Sign Up</h2>
+                <input type="text" id="signupName" placeholder="Name" required>
+                <input type="email" id="signupEmail" placeholder="Email" required>
+                <select id="signupRole" required>
+                    <option value="">Select Role</option>
+                    <option value="passenger">Passenger</option>
+                    <option value="driver">Driver</option>
+                </select>
+                <input type="password" id="signupPassword" placeholder="Password" required>
+                <input type="hidden" id="latitude">
+                <input type="hidden" id="longitude">
+                <button type="submit">Sign Up</button>
+            </form>
+
+            <form id="signinForm">
+                <h2>Sign In</h2>
+                <input type="email" id="signinEmail" placeholder="Email" required>
+                <input type="password" id="signinPassword" placeholder="Password" required>
+                <button type="submit">Sign In</button>
+            </form>
+        </div>
+
+        <!-- Buttons for Driver and Passenger UI -->
+        <div>
+            <button id="driverUIBtn">Driver UI</button>
+            <button id="passengerUIBtn">Passenger UI</button>
+        </div>
+
+        <!-- Driver UI (Appears after selecting Driver) -->
+        <div class="driver-container" id="driverContainer">
+        <h2>Driver UI</h2>
+    
+        <h3>Notifications</h3>
+        <!-- Booking Notifications Area -->
+        <div id="bookingNotificationsArea"></div>
+
+        <button id="confirmBookingBtn">Confirm Booking</button>
+        </div>
+
+
+        <!-- Booking UI (Appears after selecting Passenger) -->
+        <div class="booking-container" id="bookingContainer">
+            <h2>Create Booking</h2>
+            <div class="form-group">
+                <label for="source">Source:</label>
+                <input type="text" id="source" placeholder="Enter Source Location" required>
+                <button type="button" id="use-current-location">Use Current Location</button>
+            </div>
+            <div class="form-group">
+                <label for="destination">Destination:</label>
+                <input type="text" id="destination" placeholder="Enter Destination Location" required>
+            </div>
+            <button id="createBookingBtn">Create Booking</button>
+            <button id="getBookingsBtn">Get All Bookings</button>
+        </div>
+    </div>
+
+
+    <script>
+        const socket = io('http://localhost:8002');
+        let token = '';
+        let currentRole = ''; // To keep track of the current user role
+
+        // Function to show alerts
+        function showAlert(message) {
+            alert(message);
+        }
+
+        // Function to show booking UI
+        function switchToBookingUI() {
+            document.getElementById('authContainer').classList.remove('active');
+            document.getElementById('bookingContainer').classList.add('active');
+        }
+
+        // Function to show driver UI
+        function switchToDriverUI() {
+            document.getElementById('authContainer').classList.remove('active');
+            document.getElementById('driverContainer').classList.add('active');
+        }
+
+        // Function to get the current location using Geolocation API
+        function fetchCurrentLocation() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition((position) => {
+                    const latitude = position.coords.latitude;
+                    const longitude = position.coords.longitude;
+                    document.getElementById('latitude').value = latitude;
+                    document.getElementById('longitude').value = longitude;
+                }, (error) => {
+                    console.error("Error getting location: ", error);
+                    document.getElementById('latitude').value = 0;
+                    document.getElementById('longitude').value = 0;
+                });
+            } else {
+                console.error("Geolocation is not supported by this browser.");
+                document.getElementById('latitude').value = 0;
+                document.getElementById('longitude').value = 0;
+            }
+        }
+
+        // Fetch location when the page loads
+        window.onload = fetchCurrentLocation;
+
+        // Sign Up Handling
+        document.getElementById('signupForm').addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const name = document.getElementById('signupName').value;
+            const email = document.getElementById('signupEmail').value;
+            const role = document.getElementById('signupRole').value;
+            const password = document.getElementById('signupPassword').value;
+            const latitude = document.getElementById('latitude').value;
+            const longitude = document.getElementById('longitude').value;
+
+            const location = {
+                type: 'Point',
+                coordinates: [parseFloat(longitude), parseFloat(latitude)] // Send location as GeoJSON
+            };
+
+            try {
+                const response = await fetch('http://localhost:8002/api/v1/auth/signup/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, email, role, password, location }),
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    showAlert("Sign up successful!");
+                    token = data.data.token; // Store token for future requests
+                    currentRole = role; // Store user role
+
+                    // Set userId to socketId
+                    const socketData = { userId: data.data.userData._id, role: data.data.userData.role };
+                    socket.emit('setUserSocketId', JSON.stringify(socketData));
+
+                    if (role === "passenger") {
+                        switchToBookingUI();
+                    } else if (role === "driver") {
+                        switchToDriverUI();
+                    }
+                } else {
+                    console.error("Sign up failed:", data.message);
+                }
+            } catch (error) {
+                console.error("Error during sign up:", error);
+            }
+        });
+
+        // Sign In Handling
+        document.getElementById('signinForm').addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const email = document.getElementById('signinEmail').value;
+            const password = document.getElementById('signinPassword').value;
+
+            try {
+                const response = await fetch('http://localhost:8002/api/v1/auth/signin/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password }),
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    showAlert("Sign in successful!");
+                    token = data.data.token; // Store token for future requests
+                    currentRole = data.data.userData.role; // Store user role
+
+                    // Set SocketID for the User
+                    const socketData = { userId: data.data.userData._id, role: data.data.userData.role };
+                    socket.emit('setUserSocketId', JSON.stringify(socketData));
+
+                    if (currentRole === "passenger") {
+                        switchToBookingUI();
+                    } else if (currentRole === "driver") {
+                        switchToDriverUI();
+                    }
+                } else {
+                    showAlert("Sign in failed: " + data.message);
+                }
+            } catch (error) {
+                console.error("Error during sign in:", error);
+            }
+        });
+
+
+        // Use Current Location for Booking Source
+        document.getElementById('use-current-location').addEventListener('click', () => {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition((position) => {
+                    const latitude = position.coords.latitude;
+                    const longitude = position.coords.longitude;
+                    document.getElementById('source').value = `Lat: ${latitude}, Lon: ${longitude}`;
+                }, (error) => {
+                    console.error("Error getting location: ", error);
+                    showAlert("Unable to retrieve your current location.");
+                });
+            } else {
+                showAlert("Geolocation is not supported by this browser.");
+            }
+        });
+
+        // Create Booking Handling
+        document.getElementById('createBookingBtn').addEventListener('click', async () => {
+            // Get source and destination inputs
+            const sourceInput = document.getElementById('source').value.split(', ');
+            const destinationInput = document.getElementById('destination').value.split(', ');
+
+            // Parse latitude and longitude from the input strings
+            const source = {
+                latitude: sourceInput[0].split(': ')[1],  // Extract latitude from "Lat: latitude"
+                longitude: sourceInput[1].split(': ')[1] // Extract longitude from "Lon: longitude"
+            };
+            const destination = {
+                latitude: destinationInput[0].split(': ')[1], // Assuming input format is similar for destination
+                longitude: destinationInput[1].split(': ')[1]
+            };
+            try {
+                console.log( { source, destination} );
+                const response = await fetch('http://localhost:8002/api/v1/booking/', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ source, destination }),
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    showAlert("Booking created successfully!");
+                } else {
+                    console.error("Booking creation failed:", data.message);
+                }
+            } catch (error) {
+                console.error("Error creating booking:", error);
+            }
+        });
+
+        // Get Bookings Handling
+        document.getElementById('getBookingsBtn').addEventListener('click', async () => {
+            try {
+                const response = await fetch('http://localhost:8002/api/v1/passenger/bookings', {
+                    method: 'GET',
+                    headers: { 
+                        'Authorization': `Bearer ${token}`
+                    },
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                const bookings = data.data; // Directly access the array of bookings
+                let bookingListHTML = "";
+
+                bookings.forEach(booking => {
+                bookingListHTML += `
+               <div class="booking-request">
+                <p><strong>Source:</strong> Latitude: ${booking.source.latitude}, Longitude: ${booking.source.longitude}</p>
+                <p><strong>Destination:</strong> Latitude: ${booking.destination.latitude}, Longitude: ${booking.destination.longitude}</p>
+                <p><strong>Passenger ID:</strong> ${booking.passengerId}</p>
+                <p><strong>Driver ID:</strong> ${booking.driverId ? booking.driverId : "Not Assigned"}</p>
+                <p><strong>Fare:</strong> $${booking.fare.toFixed(2)}</p>
+                <p><strong>Status:</strong> ${booking.status}</p>
+            </div>
+                `;
+                });
+
+                document.getElementById('bookingContainer').innerHTML += bookingListHTML;
+            } else {
+                console.error("Failed to retrieve bookings:", data.message);
+            }
+            } catch (error) {
+                console.error("Error retrieving bookings:", error);
+            }
+        });
+
+        // Event listeners for Driver UI
+        document.getElementById('driverUIBtn').addEventListener('click', () => {
+            if (currentRole === "driver") {
+                switchToDriverUI();
+            } else {
+                showAlert("Please sign in as a driver first.");
+            }
+        });
+
+         // Event listeners for Pasenger (Booking) UI
+         document.getElementById('passengerUIBtn').addEventListener('click', () => {
+            if (currentRole === "passenger") {
+                switchToBookingUI();
+            } else {
+                showAlert("Please sign in as a passenger first.");
+            }
+        });
+
+
+
+        // DRIVER NEW BOOKING NOTIFICATION
+        // Listen for the 'new-BookingNotification' event
+        socket.on('new-bookingNotification', (notificationData) => {
+            const parsedNotiData=JSON.parse(notificationData);
+            console.log(parsedNotiData);
+            displayNewBookingNotification(parsedNotiData);
+        });
+
+        // Function to display new booking notifications
+        function displayNewBookingNotification(notificationData) {
+            const bookingNotificationsArea = document.getElementById('bookingNotificationsArea');
+
+            // Create a new notification element
+            const notificationElement = document.createElement('div');
+            notificationElement.classList.add('notification');
+
+            // Add notification content (adjust based on the structure of notificationData)
+            notificationElement.innerHTML = `
+            <strong>New Booking Alert!</strong><br>
+            Booking ID: ${notificationData._id}<br>
+            Source: Lat: ${notificationData.source.latitude}, Long: ${notificationData.source.longitude}<br>
+            Destination: Lat: ${notificationData.destination.latitude}, Long: ${notificationData.destination.longitude}<br>
+            PassengerId: ${notificationData.passengerId}
+            `;
+            
+            // Append the new notification to the notifications area
+            bookingNotificationsArea.appendChild(notificationElement);
+        }
+
+
+        // Confirm Booking (Driver)
+        document.getElementById('confirmBookingBtn').addEventListener('click', async () => {
+            const bookingId = prompt("Enter Booking ID to confirm:");
+
+            try {
+                const response = await fetch(`http://localhost:8002/api/v1/booking/${bookingId}/confirm`, {
+                    method: 'PUT',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                    },
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    showAlert("Booking confirmed successfully!");
+                } else {
+                    showAlert("Error confirming booking: " + data.message);
+                }
+            } catch (error) {
+                console.error("Error confirming booking:", error);
+            }
+        });
+
+        
+
+        // 1. Listen for Booking Confirmation for Driver
+        socket.on('confirmBookingDriver', (data) => {
+            const booking = JSON.parse(data);
+            showAlert(`Booking ${booking._id} confirmed for driver.`);
+            console.log('Driver Booking Confirmed:', booking);
+        });
+
+        // 2. Listen for Booking Confirmation for Passenger
+            socket.on('confirmBookingPassenger', (data) => {
+            const booking = JSON.parse(data);
+            showAlert(`Your booking ${booking._id} has been confirmed.`);
+            console.log('Passenger Booking Confirmed:', booking);
+        });
+
+        // 3. Listen for Notification to Other Drivers That Booking is Taken
+        socket.on('bookingTaken', (data) => {
+            const booking = JSON.parse(data);
+            showAlert(`Booking ${booking._id} has been taken by another driver.`);
+            console.log('Booking Taken:', booking);
+        });
+
+        
+    
+    
+
+
+    </script>
+</body>
+</html>
