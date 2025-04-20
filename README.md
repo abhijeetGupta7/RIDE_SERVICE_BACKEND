@@ -1,7 +1,3 @@
-Sure! Here's the **cleaned-up and expanded version** of your **Ride Service Backend** write-up **without the scalability and future sections**:
-
----
-
 # **Ride Service Backend**
 
 The **Ride Service Backend** is a **monolithic backend system** designed to facilitate smooth interaction between passengers and drivers in a ride-sharing environment. It supports features like **ride booking**, **location-based driver search**, and **real-time notifications**, ensuring an efficient and responsive user experience.
